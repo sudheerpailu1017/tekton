@@ -1,0 +1,189 @@
+# Task: Fetch Source Code from Git Repository
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: git-clone
+spec:
+  params:
+    - name: url
+      description: The Git repository URL
+      type: string
+    - name: revision
+      description: The Git branch to checkout
+      type: string
+      default: master
+  workspaces:
+    - name: output
+      description: The workspace where the repository will be cloned
+  steps:
+    - name: clone
+      image: alpine/git
+      script: |
+        git clone $(params.url) $(workspaces.output.path)/source
+        cd $(workspaces.output.path)/source
+        git checkout $(params.revision)
+
+---
+
+# Task: Build Docker Image and Push to Registry
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: docker-build
+spec:
+  params:
+    - name: image
+      description: The name of the Docker image to push
+      type: string
+  workspaces:
+    - name: source
+      description: The source code workspace
+  steps:
+    - name: build
+      image: docker
+      script: |
+        docker build -t $(params.image) $(workspaces.source.path)/source
+    - name: push
+      image: docker
+      script: |
+        docker push $(params.image)
+
+---
+
+# Task: Run Unit Tests
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: run-tests
+spec:
+  workspaces:
+    - name: source
+      description: The source code workspace
+  steps:
+    - name: test
+      image: python:3.8
+      script: |
+        cd $(workspaces.source.path)/source
+        pip install -r requirements.txt
+        pytest
+
+---
+
+# Task: Update Image in Helm Chart
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: update-image-in-helm
+spec:
+  params:
+    - name: image
+      description: The Docker image to update in the Helm chart
+      type: string
+    - name: helm-chart-path
+      description: The path to the Helm chart in the repository
+      type: string
+  workspaces:
+    - name: source
+      description: The source code workspace
+  steps:
+    - name: update-image
+      image: alpine
+      script: |
+        cd $(workspaces.source.path)/source/$(params.helm-chart-path)
+        sed -i 's#repository:.*#repository: $(params.image)#' values.yaml
+        git config --global user.email "ci-bot@example.com"
+        git config --global user.name "CI Bot"
+        git add values.yaml
+        git commit -m "Updated image in Helm chart to $(params.image)"
+        git push origin HEAD
+
+---
+
+# Pipeline Definition
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: python-app-pipeline
+spec:
+  params:
+    - name: git-url
+      description: The Git repository URL
+      type: string
+    - name: git-revision
+      description: The Git branch to checkout
+      type: string
+      default: master
+    - name: docker-image
+      description: The name of the Docker image to push
+      type: string
+    - name: helm-chart-path
+      description: The path to the Helm chart in the repository
+      type: string
+  workspaces:
+    - name: shared-workspace
+      description: Shared workspace for tasks to exchange data
+  tasks:
+    - name: fetch-source
+      taskRef:
+        name: git-clone
+      workspaces:
+        - name: output
+          workspace: shared-workspace
+      params:
+        - name: url
+          value: $(params.git-url)
+        - name: revision
+          value: $(params.git-revision)
+
+    - name: build-image
+      taskRef:
+        name: docker-build
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+      params:
+        - name: image
+          value: $(params.docker-image)
+
+    - name: run-tests
+      taskRef:
+        name: run-tests
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    - name: update-image-in-helm
+      taskRef:
+        name: update-image-in-helm
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+      params:
+        - name: image
+          value: $(params.docker-image)
+        - name: helm-chart-path
+          value: $(params.helm-chart-path)
+
+---
+
+# PipelineRun: To Trigger the Pipeline
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  name: python-app-pipeline-run
+spec:
+  pipelineRef:
+    name: python-app-pipeline
+  params:
+    - name: git-url
+      value: "https://github.com/your-username/sample-python-app"
+    - name: git-revision
+      value: "main"
+    - name: docker-image
+      value: "docker.io/your-username/sample-python-app:latest"
+    - name: helm-chart-path
+      value: "charts/myapp"
+  workspaces:
+    - name: shared-workspace
+      persistentVolumeClaim:
+        claimName: your-pvc

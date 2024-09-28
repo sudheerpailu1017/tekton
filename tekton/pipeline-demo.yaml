@@ -1,0 +1,14 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: hello-world-pipeline
+spec:
+  tasks:
+    - name: hello-world-task
+      taskSpec:
+        steps:
+          - name: echo
+            image: ubuntu
+            script: |
+              echo "Hello, World!"
+
