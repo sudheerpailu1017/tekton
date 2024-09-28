@@ -1,7 +1,6 @@
 # Default values for deploying the Python Flask application
 image:
   repository: docker.io/sudheerpailu1017/sample-python-app:latest
-  tag: latest
 
 service:
   type: ClusterIP
